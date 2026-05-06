@@ -30,5 +30,5 @@ SELECT
     END AS current_status
 FROM sla_definitions s
 LEFT JOIN todays_completions t ON s.job_name = t.job_name
-WHERE CAST(current_timestamp() AS TIME) > CAST(s.sla_time_utc AS TIME)
-  AND (t.last_completion IS NULL OR CAST(t.last_completion AS TIME) > CAST(s.sla_time_utc AS TIME));
+WHERE date_format(current_timestamp(), 'HH:mm') > s.sla_time_utc
+  AND (t.last_completion IS NULL OR date_format(t.last_completion, 'HH:mm') > s.sla_time_utc);
