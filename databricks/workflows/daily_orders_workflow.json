@@ -1,0 +1,156 @@
+{
+  "name": "daily_orders_pipeline",
+  "description": "Daily Orders Pipeline — migrated from scripts/run_daily_orders.ksh (AutoSys: JOB_DAILY_ORDERS_LOAD)",
+  "tags": {
+    "team": "data-engineering",
+    "source": "abinitio-migration",
+    "original_script": "scripts/run_daily_orders.ksh",
+    "autosys_job": "JOB_DAILY_ORDERS_LOAD"
+  },
+  "schedule": {
+    "quartz_cron_expression": "0 0 2 * * ?",
+    "timezone_id": "UTC",
+    "pause_status": "UNPAUSED"
+  },
+  "max_concurrent_runs": 1,
+  "job_clusters": [
+    {
+      "job_cluster_key": "etl_cluster",
+      "new_cluster": {
+        "spark_version": "14.3.x-scala2.12",
+        "node_type_id": "Standard_DS3_v2",
+        "num_workers": 4,
+        "spark_conf": {
+          "spark.databricks.delta.optimizeWrite.enabled": "true",
+          "spark.databricks.delta.autoCompact.enabled": "true",
+          "spark.sql.shuffle.partitions": "8"
+        },
+        "custom_tags": {
+          "pipeline": "daily_orders",
+          "cost_center": "data-platform"
+        }
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "task_key": "extract_orders",
+      "description": "Phase 1: Extract from source systems (was: extract_orders.mp)",
+      "job_cluster_key": "etl_cluster",
+      "notebook_task": {
+        "notebook_path": "/Repos/production/databricks/notebooks/parallel_loader",
+        "base_parameters": {
+          "source_path": "{{job.parameters.source_path}}",
+          "target_table": "catalog.bronze.orders_raw",
+          "partition_count": "{{job.parameters.partition_count}}",
+          "batch_date": "{{job.parameters.batch_date}}",
+          "max_errors": "{{job.parameters.max_errors}}",
+          "load_mode": "append",
+          "checkpoint_path": "/mnt/checkpoints/orders/extract"
+        }
+      },
+      "timeout_seconds": 3600,
+      "max_retries": 2,
+      "min_retry_interval_millis": 60000,
+      "retry_on_timeout": true
+    },
+    {
+      "task_key": "cdc_orders",
+      "description": "Phase 2: CDC detection (was: cdc_orders.mp with 4 partitions)",
+      "depends_on": [
+        {"task_key": "extract_orders"}
+      ],
+      "job_cluster_key": "etl_cluster",
+      "notebook_task": {
+        "notebook_path": "/Repos/production/databricks/notebooks/cdc_processor",
+        "base_parameters": {
+          "source_path": "/mnt/bronze/orders_raw",
+          "target_table": "catalog.silver.orders",
+          "key_columns": "order_id",
+          "hash_columns": "order_id,item_count,item_names,item_quantities,order_status",
+          "partition_count": "4",
+          "audit_table": "catalog.silver.orders_cdc_audit",
+          "retention_days": "90",
+          "max_errors": "{{job.parameters.max_errors}}"
+        }
+      },
+      "timeout_seconds": 3600,
+      "max_retries": 1
+    },
+    {
+      "task_key": "load_staging",
+      "description": "Phase 3: Load to staging (was: load_staging_orders.mp)",
+      "depends_on": [
+        {"task_key": "cdc_orders"}
+      ],
+      "job_cluster_key": "etl_cluster",
+      "notebook_task": {
+        "notebook_path": "/Repos/production/databricks/notebooks/parallel_loader",
+        "base_parameters": {
+          "source_path": "/mnt/silver/orders",
+          "target_table": "catalog.silver.orders_staging",
+          "partition_count": "4",
+          "batch_date": "{{job.parameters.batch_date}}",
+          "max_errors": "100",
+          "load_mode": "merge",
+          "checkpoint_path": "/mnt/checkpoints/orders/staging"
+        }
+      },
+      "timeout_seconds": 1800,
+      "max_retries": 1
+    },
+    {
+      "task_key": "production_rollover",
+      "description": "Phase 4: Production load (was: prod_rollover_orders.mp)",
+      "depends_on": [
+        {"task_key": "load_staging"}
+      ],
+      "job_cluster_key": "etl_cluster",
+      "notebook_task": {
+        "notebook_path": "/Repos/production/databricks/notebooks/parallel_loader",
+        "base_parameters": {
+          "source_path": "/mnt/silver/orders_staging",
+          "target_table": "catalog.gold.orders",
+          "partition_count": "8",
+          "batch_date": "{{job.parameters.batch_date}}",
+          "max_errors": "50",
+          "load_mode": "merge",
+          "checkpoint_path": "/mnt/checkpoints/orders/production"
+        }
+      },
+      "timeout_seconds": 3600,
+      "max_retries": 2
+    }
+  ],
+  "parameters": [
+    {
+      "name": "batch_date",
+      "default": ""
+    },
+    {
+      "name": "source_path",
+      "default": "/mnt/raw/orders"
+    },
+    {
+      "name": "partition_count",
+      "default": "8"
+    },
+    {
+      "name": "max_errors",
+      "default": "100"
+    }
+  ],
+  "run_as": {
+    "service_principal_name": "databricks-etl-service-principal"
+  },
+  "email_notifications": {
+    "on_failure": ["data-engineering-alerts@company.com"],
+    "on_start": [],
+    "on_success": []
+  },
+  "webhook_notifications": {
+    "on_failure": [
+      {"id": "slack-data-alerts-webhook"}
+    ]
+  }
+}

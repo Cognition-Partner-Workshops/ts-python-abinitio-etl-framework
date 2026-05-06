@@ -1,0 +1,69 @@
+{
+  "alerts": [
+    {
+      "name": "Ab Initio Migration — Job Failure Alert",
+      "description": "Fires when any migrated Ab Initio pipeline fails. Replaces AutoSys monitoring + Slack webhook pattern from monitoring/job_monitor.py.",
+      "query_path": "databricks/monitoring/job_failure_alert.sql",
+      "schedule": {
+        "interval_seconds": 300
+      },
+      "condition": {
+        "op": "GREATER_THAN",
+        "operand": {
+          "column": {
+            "name": "run_id",
+            "aggregation": "COUNT"
+          }
+        },
+        "threshold": 0
+      },
+      "notifications": [
+        {
+          "destination_type": "slack",
+          "channel": "#data-pipeline-alerts",
+          "message_template": "🚨 Pipeline Failure: {{job_name}} (run_id={{run_id}}) failed at {{failed_at}}. Error: {{error_message}}"
+        },
+        {
+          "destination_type": "email",
+          "recipients": ["data-engineering-alerts@company.com"],
+          "subject_template": "[ALERT] Databricks Pipeline Failure: {{job_name}}"
+        }
+      ],
+      "tags": {
+        "source": "abinitio-migration",
+        "severity": "high",
+        "original_system": "autosys"
+      }
+    },
+    {
+      "name": "Ab Initio Migration — SLA Breach Alert",
+      "description": "Fires when daily orders pipeline does not complete by 06:00 UTC SLA. Replaces SLATracker.check_sla() pattern from monitoring/sla_tracker.py.",
+      "query_path": "databricks/monitoring/sla_breach_check.sql",
+      "schedule": {
+        "interval_seconds": 900
+      },
+      "condition": {
+        "op": "GREATER_THAN",
+        "operand": {
+          "column": {
+            "name": "job_name",
+            "aggregation": "COUNT"
+          }
+        },
+        "threshold": 0
+      },
+      "notifications": [
+        {
+          "destination_type": "slack",
+          "channel": "#data-pipeline-alerts",
+          "message_template": "⚠️ SLA Breach: {{job_name}} has not completed by {{sla_deadline}}. Current status: {{current_status}}"
+        }
+      ],
+      "tags": {
+        "source": "abinitio-migration",
+        "severity": "high",
+        "original_system": "autosys-sla"
+      }
+    }
+  ]
+}

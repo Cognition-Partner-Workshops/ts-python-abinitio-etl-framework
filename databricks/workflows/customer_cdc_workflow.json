@@ -1,0 +1,147 @@
+{
+  "name": "customer_cdc_pipeline",
+  "description": "Customer CDC Pipeline — migrated from scripts/run_customer_cdc.ksh (AutoSys: JOB_CUSTOMER_CDC, runs every 4 hours)",
+  "tags": {
+    "team": "data-engineering",
+    "source": "abinitio-migration",
+    "original_script": "scripts/run_customer_cdc.ksh",
+    "autosys_job": "JOB_CUSTOMER_CDC",
+    "frequency": "every-4-hours"
+  },
+  "schedule": {
+    "quartz_cron_expression": "0 0 0/4 * * ?",
+    "timezone_id": "UTC",
+    "pause_status": "UNPAUSED"
+  },
+  "max_concurrent_runs": 1,
+  "job_clusters": [
+    {
+      "job_cluster_key": "cdc_cluster",
+      "new_cluster": {
+        "spark_version": "14.3.x-scala2.12",
+        "node_type_id": "Standard_DS3_v2",
+        "num_workers": 2,
+        "spark_conf": {
+          "spark.databricks.delta.optimizeWrite.enabled": "true",
+          "spark.databricks.delta.autoCompact.enabled": "true",
+          "spark.sql.shuffle.partitions": "8"
+        },
+        "custom_tags": {
+          "pipeline": "customer_cdc",
+          "cost_center": "data-platform"
+        }
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "task_key": "snapshot_customer",
+      "description": "Step 1: Snapshot current state from source (was: snapshot_customer.mp)",
+      "job_cluster_key": "cdc_cluster",
+      "notebook_task": {
+        "notebook_path": "/Repos/production/databricks/notebooks/parallel_loader",
+        "base_parameters": {
+          "source_path": "{{job.parameters.source_path}}",
+          "target_table": "catalog.bronze.customer_snapshot_current",
+          "partition_count": "{{job.parameters.partition_count}}",
+          "batch_date": "",
+          "max_errors": "{{job.parameters.max_errors}}",
+          "load_mode": "overwrite",
+          "checkpoint_path": "/mnt/checkpoints/customer/snapshot"
+        }
+      },
+      "timeout_seconds": 1800,
+      "max_retries": 2,
+      "min_retry_interval_millis": 30000
+    },
+    {
+      "task_key": "cdc_detect_and_apply",
+      "description": "Steps 2-3: Compare snapshots and apply changes via MERGE (was: cdc_detect_customer.mp + apply_customer_changes.mp)",
+      "depends_on": [
+        {"task_key": "snapshot_customer"}
+      ],
+      "job_cluster_key": "cdc_cluster",
+      "notebook_task": {
+        "notebook_path": "/Repos/production/databricks/notebooks/cdc_processor",
+        "base_parameters": {
+          "source_path": "/mnt/bronze/customer_snapshot_current",
+          "target_table": "catalog.silver.customer_master",
+          "key_columns": "{{job.parameters.key_columns}}",
+          "hash_columns": "{{job.parameters.hash_columns}}",
+          "partition_count": "{{job.parameters.partition_count}}",
+          "audit_table": "catalog.silver.customer_changes_audit",
+          "retention_days": "{{job.parameters.retention_days}}",
+          "max_errors": "{{job.parameters.max_errors}}"
+        }
+      },
+      "timeout_seconds": 3600,
+      "max_retries": 1
+    },
+    {
+      "task_key": "audit_trail",
+      "description": "Step 4: Generate audit trail (handled inline by CDC notebook via CDF, this validates completeness)",
+      "depends_on": [
+        {"task_key": "cdc_detect_and_apply"}
+      ],
+      "job_cluster_key": "cdc_cluster",
+      "sql_task": {
+        "query": {
+          "query_id": ""
+        },
+        "warehouse_id": "{{job.parameters.sql_warehouse_id}}",
+        "parameters": {
+          "audit_table": "catalog.silver.customer_changes_audit",
+          "retention_days": "{{job.parameters.retention_days}}"
+        },
+        "source": "WORKSPACE",
+        "file": {
+          "path": "/Repos/production/databricks/monitoring/audit_validation.sql"
+        }
+      },
+      "timeout_seconds": 300
+    }
+  ],
+  "parameters": [
+    {
+      "name": "source_path",
+      "default": "/mnt/raw/customer"
+    },
+    {
+      "name": "key_columns",
+      "default": "customer_id"
+    },
+    {
+      "name": "hash_columns",
+      "default": "customer_id,name,address,phone,email,status"
+    },
+    {
+      "name": "partition_count",
+      "default": "8"
+    },
+    {
+      "name": "max_errors",
+      "default": "50"
+    },
+    {
+      "name": "retention_days",
+      "default": "90"
+    },
+    {
+      "name": "sql_warehouse_id",
+      "default": ""
+    }
+  ],
+  "run_as": {
+    "service_principal_name": "databricks-etl-service-principal"
+  },
+  "email_notifications": {
+    "on_failure": ["data-engineering-alerts@company.com"],
+    "on_start": [],
+    "on_success": []
+  },
+  "webhook_notifications": {
+    "on_failure": [
+      {"id": "slack-data-alerts-webhook"}
+    ]
+  }
+}
