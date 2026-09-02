@@ -1,0 +1,49 @@
+{
+  "_comment": "Hand-authored GATE 1 answer key. Copy to expected/<attribute_lower>_lineage.json, fill it in from the artifacts BEFORE the analysis session starts, and never let the analysis session edit it. Keys prefixed with '_' are ignored by verify_against_answer_key.py. Every node/hop carries an `evidence` grade: 'explicit' (a checked-in artifact names it), 'inferred' (derived from naming/sample data/wrapper order), or 'external' (lives only on the Ab Initio host, e.g. a missing .mp/.pset).",
+  "target": {
+    "system": "ORACLE_STG",
+    "table": "STAGING.ORDERS",
+    "column": "ORDER_STATUS"
+  },
+  "formula": "direct carry: raw_orders.status -> cdc delta -> order_items.order_status -> STAGING.ORDERS.ORDER_STATUS (MERGE on order_id)",
+  "nodes": [
+    {
+      "column": "ORDER_SYSTEM.ORDERS.STATUS",
+      "graph": "extract_orders",
+      "artifact": "scripts/run_daily_orders.ksh",
+      "stage_column": "raw_orders.status",
+      "evidence": "inferred",
+      "_why": "extract_orders.mp and orders_extract.pset are not in the repo; the raw shape is taken from data/sample/orders.dat (7 pipe-delimited columns, col 4 = status)."
+    }
+  ],
+  "hops": [
+    {
+      "graph": "cdc_orders",
+      "artifact": "graphs/cdc_processor.py",
+      "output": "orders_delta.status",
+      "inputs": ["raw_orders.status"],
+      "hop_type": "cdc (hash compare, multi-output)",
+      "evidence": "inferred"
+    },
+    {
+      "graph": "load_staging_orders",
+      "artifact": "psets/pset_templates/orders_staging.pset",
+      "output": "order_items.order_status",
+      "inputs": ["orders_delta.status"],
+      "hop_type": "record-format bind",
+      "evidence": "explicit",
+      "_why": "DML_FILE=/data/projects/enterprise_etl/dml/order_items.dml is declared in the PSET."
+    },
+    {
+      "graph": "load_staging_orders",
+      "artifact": "psets/pset_templates/orders_staging.pset",
+      "output": "STAGING.ORDERS.ORDER_STATUS",
+      "inputs": ["order_items.order_status"],
+      "hop_type": "load (MERGE)",
+      "evidence": "explicit",
+      "_why": "TARGET_TABLE=STAGING.ORDERS, LOAD_MODE=MERGE, REJECT_PATH=/data/rejects/orders."
+    }
+  ],
+  "runtime_parameters": ["BATCH_DATE", "PARTITION_COUNT", "BATCH_SIZE", "MAX_ERRORS", "CHECKPOINT_DIR", "SLA_MINUTES"],
+  "non_lineage_side_branches": ["prod_rollover_orders (downstream of the target; not part of the target's upstream chain)"]
+}
