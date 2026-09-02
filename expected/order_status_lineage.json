@@ -1,0 +1,57 @@
+{
+  "_comment": "Hand-authored GATE 1 answer key for STAGING.ORDERS.ORDER_STATUS. Authored from the checked-in artifacts only (scripts/run_daily_orders.ksh, psets/pset_templates/orders_staging.pset, dml/order_items.dml, graphs/cdc_processor.py, data/sample/orders.dat). Keys prefixed with '_' are ignored by the verifier. Never edited by an analysis run.",
+  "target": {
+    "system": "ORACLE_STG",
+    "table": "STAGING.ORDERS",
+    "column": "ORDER_STATUS"
+  },
+  "formula": "direct carry, no transformation: ORDER_SYSTEM.ORDERS.STATUS -> raw_orders.status (extract_orders) -> orders_delta.status (cdc_orders, hash-compare) -> order_items.order_status (DML bind in load_staging_orders) -> STAGING.ORDERS.ORDER_STATUS (LOAD_MODE=MERGE)",
+  "nodes": [
+    {
+      "column": "ORDER_SYSTEM.ORDERS.STATUS",
+      "graph": "extract_orders",
+      "artifact": "scripts/run_daily_orders.ksh",
+      "stage_column": "raw_orders.status",
+      "evidence": "inferred",
+      "_why": "Phase 1 of run_daily_orders.ksh runs graphs/orders/extract_orders.mp with orders_extract.pset; neither is in the repo. RECORD_SOURCE=ORDER_SYSTEM comes from orders_staging.pset. Raw shape is data/sample/orders.dat: 7 pipe-delimited columns, no header, column 4 holds SHIPPED/DELIVERED/PROCESSING."
+    }
+  ],
+  "hops": [
+    {
+      "graph": "cdc_orders",
+      "artifact": "graphs/cdc_processor.py",
+      "output": "orders_delta.status",
+      "inputs": ["raw_orders.status"],
+      "hop_type": "cdc (hash compare, multi-output)",
+      "evidence": "inferred",
+      "_why": "Phase 2 runs graphs/orders/cdc_orders.mp (missing) with orders_cdc.pset (missing). graphs/cdc_processor.py is the execution pattern: CDCProcessor(key_columns, compare_columns) MD5-hashes compare columns and emits inserts/updates/deletes. Value is carried unchanged; row visibility depends on compare_columns. SOURCE_PATH=/data/cdc/orders/delta in orders_staging.pset confirms a CDC delta feeds the next step."
+    },
+    {
+      "graph": "load_staging_orders",
+      "artifact": "psets/pset_templates/orders_staging.pset",
+      "output": "order_items.order_status",
+      "inputs": ["orders_delta.status"],
+      "hop_type": "record-format bind",
+      "evidence": "explicit",
+      "_why": "orders_staging.pset: DML_FILE=/data/projects/enterprise_etl/dml/order_items.dml. dml/order_items.dml last field is string(\"\\n\") order_status. This is the only explicit DML binding in the estate."
+    },
+    {
+      "graph": "load_staging_orders",
+      "artifact": "psets/pset_templates/orders_staging.pset",
+      "output": "STAGING.ORDERS.ORDER_STATUS",
+      "inputs": ["order_items.order_status"],
+      "hop_type": "load (MERGE)",
+      "evidence": "explicit",
+      "_why": "orders_staging.pset: TARGET_TABLE=STAGING.ORDERS, TARGET_SCHEMA=STAGING, LOAD_MODE=MERGE, REJECT_PATH=/data/rejects/orders, MAX_ERRORS=100. Merge key order_id is inferred (first DML field, CDC key)."
+    }
+  ],
+  "runtime_parameters": ["BATCH_DATE", "PARTITION_COUNT", "BATCH_SIZE", "MAX_ERRORS", "CHECKPOINT_DIR", "REJECT_PATH", "SLA_MINUTES", "SOURCE_PATH"],
+  "downstream_consumers": ["prod_rollover_orders (Phase 4, orders_prod.pset missing) - reads STAGING.ORDERS, not part of the upstream chain"],
+  "expected_findings": [
+    "F-GRAPH: graphs/orders/{extract_orders,cdc_orders,load_staging_orders,prod_rollover_orders}.mp not in repo",
+    "F-PSET: orders_extract.pset, orders_cdc.pset, orders_prod.pset not in repo; orders_pipeline.pset present but unreferenced",
+    "F-DML-1: order_items.dml (5 fields, two item_count vectors, comma-delimited) does not match data/sample/orders.dat (7 flat pipe-delimited columns)",
+    "F-WRAP-1: run_daily_orders.ksh uses '| tee' without 'set -o pipefail', so a failed phase can exit 0",
+    "F-TEST-1: tests/test_pset_manager.py::TestCDCProcessor::{test_inserts_detected,test_deletes_detected} fail on main"
+  ]
+}

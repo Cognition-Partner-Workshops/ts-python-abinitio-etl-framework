@@ -12,7 +12,7 @@ description: Column-level lineage + impact analysis for ANY mart/staging attribu
 | `TARGET_ATTRIBUTE` | yes | `ORACLE_STG.STAGING.ORDERS.ORDER_STATUS` | `SYSTEM.SCHEMA.TABLE.COLUMN` or `TABLE.COLUMN`; normalize to upper-case, `attribute_lower` = `order_status` |
 | `PROPOSED_CHANGE` | no | "rename ORDER_STATUS -> ORDER_STATE", "widen decimal(10.2) -> (12.2)", "add channel to CDC compare_columns" | drives IMPACT_ANALYSIS.md; if absent, write the impact of a *type widening* as the default scenario and say so |
 | `OUTPUT_DIR` | no | `analysis/` (default) | never write outside it, except nothing else |
-| `ANSWER_KEY` | no | `expected/<attribute_lower>_lineage.json` | auto-detected; if absent GATE 1 runs in self-check mode |
+| `ANSWER_KEY` | no | `expected/<attribute_lower>_lineage.json` | auto-detected; if absent GATE 1 runs in self-check mode. `expected/order_status_lineage.json` ships with the repo |
 
 Everything is derived **statically from the repo**. Never invoke `air`, never connect to Oracle/Teradata/Databricks, never modify `graphs/`, `dml/`, `psets/`, `scripts/`, `data/` or `expected/`.
 
