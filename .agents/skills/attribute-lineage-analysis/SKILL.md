@@ -38,7 +38,7 @@ Work through every step; record the command/output you used in the `LINEAGE.json
 1. `cat README.md`; note the migration framing (graphs→notebooks, DML→schemas, PSET→job params, CDC→Delta MERGE).
 2. Run the scanner and keep its output as the estate inventory:
    ```bash
-   python .agents/skills/attribute-lineage-analysis/templates/estate_inventory.py \
+   python3 .agents/skills/attribute-lineage-analysis/templates/estate_inventory.py \
        --json "$OUTPUT_DIR/estate_inventory.json" > "$OUTPUT_DIR/estate_inventory.md"
    ```
    It cross-references ksh → `.mp`/`.pset` → `DML_FILE` → `dml/` (with a parser that handles the real grammar), lists missing/unreferenced artifacts, flags `tee`-without-`pipefail`, and classifies each step set-based vs procedural.
@@ -76,15 +76,16 @@ From the wrapper(s): job name, cadence (comment header / AutoSys hint), step ord
 
 ### 4. GATE 1 — answer key / structural self-check (mandatory, before viz)
 ```bash
-python .agents/skills/attribute-lineage-analysis/templates/verify_against_answer_key.py \
+python3 .agents/skills/attribute-lineage-analysis/templates/verify_against_answer_key.py \
     --generated "$OUTPUT_DIR/LINEAGE.json" \
     --answer-key "expected/${attribute_lower}_lineage.json"      # omit if none exists
 ```
-- Answer-key mode: target identity, every expected source node `(column, graph, stage_column)`, every expected hop `(graph, output)`, no evidence-grade upgrades. The helper **fails if the key has uncommitted changes** — the key must be committed before the analysis and is never edited by it. A mismatch is a finding to investigate (re-read the artifacts), never something to paper over.
+- Answer-key mode: target identity, every expected source node `(column, graph, stage_column)`, every expected hop `(graph, output)`, no evidence-grade upgrades. The helper **fails if the key has uncommitted changes** (`git status` on the key path) — the key must be a *tracked, committed* file under `expected/`; an untracked or out-of-tree copy bypasses the guard, so always point `--answer-key` at the tracked file. A mismatch is a finding to investigate (re-read the artifacts), never something to paper over.
 - Self-check mode (no key for this attribute): every hop has graph + artifact + evidence grade; `explicit` artifacts exist on disk; every input resolves to a source stage column or a prior hop output; final hop output == target. Record `mode: self-check` in `LINEAGE.json` and say "no answer key" in `LINEAGE.md` limitations.
 - Paste the verdict block verbatim into `LINEAGE.md`. Do not proceed to GATE 2 on FAIL.
 
 ### 5. GATE 2 — in-browser viz test with a real screen recording (mandatory)
+0. Use `python3` (or `/usr/bin/python3`) for every helper — on shared boxes `python` may resolve to another repo's venv. The helpers need only the standard library.
 1. Maximize the visible browser (`wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz`).
 2. **Start recording first**: prefer the platform recorder (`recording_start`); fallback `templates/record_browser_test.sh start "$OUTPUT_DIR/browser_test"`. Add `setup` / `test_start` / `assertion` annotations if the recorder supports them.
 3. Open `file://$PWD/$OUTPUT_DIR/lineage_viz.html` in that browser (not headless, not off-screen). Confirm zero console errors.
@@ -110,7 +111,7 @@ python .agents/skills/attribute-lineage-analysis/templates/verify_against_answer
 7. **Runtime parameters are not lineage.** `BATCH_DATE`, partition counts, checkpoint/reject paths, DB env names select or route rows; they never produce the attribute's value. Draw them as `[P]`.
 8. **Do not collapse hops.** The CDC step is a real hop even though it carries the value unchanged — it decides row visibility and depends on `compare_columns`.
 9. **Nested/vector/conditional DML fields**: flatten to `parent.child`, keep `vector_of` and `condition`; a target column inside a conditional record inherits the predicate as a rule.
-10. **Answer key hygiene**: the helper refuses to PASS on an uncommitted key. If a key is missing, the run is self-check only — never claim an answer-key match.
+10. **Answer key hygiene**: the helper refuses to PASS on an uncommitted *tracked* key (untracked copies are not detected — use the tracked path). If a key is missing, the run is self-check only — never claim an answer-key match.
 11. **Viz must work from `file://`**: no `fetch()`, no CDN, no ES modules. Wide chains need horizontal scroll — that is fine as long as the ordered walkthrough reaches every node; test it.
 12. **Shape/stroke/tag, not color**: node types via shape + `[S]/[I]/[fx]/[T]/[P]`; evidence via stroke (solid/dashed/dotted) + `[explicit]/[inferred]/[external]` text.
 13. **Playwright can't click transparent edge hit-paths** on straight edges (zero-height bbox); use `page.mouse.click(x,y)` on a point along the path or click nodes. Real users are unaffected. GATE 2 is a *human-style* click-through on the visible desktop anyway.
@@ -122,6 +123,6 @@ python .agents/skills/attribute-lineage-analysis/templates/verify_against_answer
 - `templates/estate_inventory.py` — read-only scanner: ksh/PSET/DML cross-reference, real-grammar DML parser, set-based vs procedural classification, missing-artifact report (Markdown + `--json`).
 - `templates/verify_against_answer_key.py` — GATE 1 helper (answer-key and self-check modes, dirty-key guard, evidence-grade guard).
 - `templates/answer_key_template.json` — key format with a worked `STAGING.ORDERS.ORDER_STATUS` example and `_why` annotations.
-- `templates/lineage_viz_template.html` — self-contained SVG viz with evidence grades, `missing[]` warning, ordered walkthrough (worked example: `ORDER_STATUS`).
+- `templates/lineage_viz_template.html` — self-contained SVG viz with evidence grades, `missing[]` warning, ordered walkthrough (worked example: `ORDER_STATUS`; re-verify every fact in the EDIT block against the artifacts before shipping — values such as `PARTITION_COUNT` come from the PSET, DB names from `scripts/setenv.ksh`).
 - `templates/BROWSER_TEST_template.md` — GATE 2 report skeleton.
 - `templates/record_browser_test.sh` — ffmpeg x11grab fallback recorder (`start`/`stop`).

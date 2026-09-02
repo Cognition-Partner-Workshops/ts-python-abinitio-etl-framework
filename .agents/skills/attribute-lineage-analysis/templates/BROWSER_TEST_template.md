@@ -9,7 +9,7 @@
 | Recording | `browser_test/lineage_viz_walkthrough.mp4` — `<duration>` s, `<size>`; started **before** first click, stopped after last assertion; cursor visible |
 | Console errors on load | 0 (or list) |
 | Nodes rendered / expected | `<n>` / `<n>` (from `LINEAGE.json`: sources + hops + parameters) |
-| Edges rendered / expected | `<n>` / `<n>` |
+| Edges rendered / expected | `<n>` / `<n>` (expected = one edge per hop input + one per runtime parameter drawn; `LINEAGE.json` has no edge list, derive it from `hops[].inputs` + `runtime_parameters`) |
 | Walkthrough entries | `<n>` — all clicked |
 | GATE 1 mode this run | answer-key | self-check |
 
@@ -27,7 +27,7 @@
 
 - [ ] Node types distinguishable by shape + `[S]/[I]/[fx]/[T]/[P]` tag (not color alone)
 - [ ] Evidence grades distinguishable by stroke (solid/dashed/dotted) + `[explicit]/[inferred]/[external]` text
-- [ ] `Reset highlight` clears selection
+- [ ] `Reset highlight` clears dimming and red highlight strokes (the details panel keeps the last text by design)
 - [ ] Page works with no network (no CDN / fetch)
 
 ## Defects found & fixed
