@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Attribute Lineage — Interactive Viz (template)</title>
+<!--
+  REUSABLE TEMPLATE for the attribute-lineage-analysis Skill (ts-python-abinitio-etl estate).
+  - Self-contained: no network dependencies. Works from file://.
+  - Replace TARGET, COLTITLES, NODES, EDGES and WALK below with your attribute's chain.
+  - Layout is automatic: give each node a `layer` (0..N left->right); nodes in a
+    layer are stacked top->bottom in array order. No manual x/y needed.
+  - Node `type` drives shape + [tag] (not color alone):
+      source | intermediate | derived | target | parameter
+  - Node `ev` (evidence grade) drives stroke style + [grade] pill:
+      explicit  = a checked-in artifact names this field/step   (solid stroke)
+      inferred  = derived from wrapper order / sample data / naming (dashed)
+      external  = only exists on the Ab Initio host (missing .mp/.pset) (dotted)
+  - Optional `hop` (integer) tags a node as an answer-key / self-check hop.
+  - Put per-node details in `d`: graph, artifact (repo path or missing .mp/.pset),
+    dml, pset, wrapper, stage_column, hop_type, inputs[], formula/rule, key,
+    system, precision, role, load_mode, missing[] (artifacts that should exist).
+  The NODES/EDGES below are a filled-in EXAMPLE (STAGING.ORDERS.ORDER_STATUS) so
+  the template renders as-is; overwrite them for a different attribute.
+-->
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; height:100%; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:#f4f6f8; color:#1c2430; }
+  header { padding:12px 18px; background:#1c2430; color:#fff; }
+  header h1 { margin:0; font-size:17px; }
+  header p { margin:4px 0 0; font-size:12px; color:#c3cbd6; }
+  #app { display:flex; height:calc(100% - 58px); }
+  #graphwrap { flex:1 1 auto; overflow:auto; position:relative; }
+  #side { width:400px; flex:0 0 400px; background:#fff; border-left:1px solid #d9dee5; overflow:auto; padding:14px 16px; }
+  svg { display:block; }
+  .node { cursor:pointer; }
+  .node text { font-size:11px; pointer-events:none; }
+  .node .nlabel { font-weight:600; }
+  .node .nsub { fill:#4b5563; font-size:10px; }
+  .node .badge { font-size:9px; font-weight:700; }
+  .shape { stroke:#334155; stroke-width:1.5; fill:#fff; }
+  .type-source .shape { fill:#e8eef7; stroke:#2b4c7e; }
+  .type-intermediate .shape { fill:#eef6ef; stroke:#3a7d44; }
+  .type-derived .shape { fill:#fbf0e6; stroke:#b5651d; }
+  .type-parameter .shape { fill:#eceff3; stroke:#475569; }
+  .type-target .shape { fill:#f3e9f6; stroke:#7a2e86; stroke-width:2.5; }
+  .ev-inferred .shape { stroke-dasharray:6 3; }
+  .ev-external .shape { stroke-dasharray:2 3; }
+  .node.selected .shape { stroke:#e11d48; stroke-width:3.5; }
+  .node.dimmed { opacity:0.28; }
+  .edge { stroke:#94a3b8; stroke-width:2; fill:none; cursor:pointer; marker-end:url(#arrow); }
+  .edge.ev-inferred, .edge.ev-external { stroke-dasharray:6 4; }
+  .edge.hl { stroke:#e11d48; stroke-width:3; marker-end:url(#arrowhl); }
+  .edge.dimmed { opacity:0.15; }
+  .edgehit { stroke:transparent; stroke-width:14; fill:none; cursor:pointer; }
+  .collab { fill:#334155; font-size:11px; font-weight:600; }
+  .hoptag { font-size:9px; fill:#e11d48; font-weight:700; }
+  .evtag { font-size:9px; fill:#475569; font-weight:700; }
+  #side h2 { font-size:14px; margin:0 0 8px; }
+  #detail { font-size:12.5px; line-height:1.5; }
+  #detail .k { color:#64748b; font-weight:600; text-transform:uppercase; font-size:10px; letter-spacing:.03em; }
+  #detail .v { margin:0 0 10px; word-break:break-word; }
+  #detail .formula { display:block; background:#0f172a; color:#e2e8f0; padding:8px 10px; border-radius:6px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11.5px; white-space:pre-wrap; margin-top:4px; }
+  #detail .warn { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; padding:6px 8px; border-radius:6px; font-size:11.5px; margin-bottom:10px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; margin:0 4px 8px 0; background:#eceff3; color:#475569; }
+  .pill.explicit { background:#dcfce7; color:#166534; }
+  .pill.inferred { background:#fef9c3; color:#854d0e; }
+  .pill.external { background:#fee2e2; color:#991b1b; }
+  .legend { margin-top:14px; border-top:1px solid #e2e8f0; padding-top:10px; }
+  .legend .row { display:flex; align-items:center; gap:8px; margin-bottom:7px; font-size:11.5px; }
+  #walk { margin-top:14px; border-top:1px solid #e2e8f0; padding-top:10px; }
+  #walk ol { margin:6px 0 0; padding-left:20px; font-size:11.5px; }
+  #walk li { margin-bottom:3px; cursor:pointer; color:#1d4ed8; }
+  #walk li:hover { text-decoration:underline; }
+  .muted { color:#64748b; font-size:11px; }
+  .btn { display:inline-block; margin-top:6px; padding:5px 10px; font-size:11px; border:1px solid #cbd5e1; border-radius:6px; background:#fff; cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Attribute Lineage</h1>
+  <p id="subtitle">Click any node or edge for details</p>
+</header>
+<div id="app">
+  <div id="graphwrap"><svg id="svg"></svg></div>
+  <div id="side">
+    <h2>Details</h2>
+    <div id="detail"><p class="muted">Click a node or edge, or use the ordered walkthrough below to step through every source node and hop.</p></div>
+    <div class="legend">
+      <strong style="font-size:12px;">Node types</strong>
+      <div class="row"><svg width="34" height="20"><rect x="1" y="2" width="32" height="16" rx="1" class="shape type-source"/></svg><span>[S] Source column</span></div>
+      <div class="row"><svg width="34" height="20"><rect x="1" y="2" width="32" height="16" rx="8" class="shape type-intermediate"/></svg><span>[I] Intermediate field</span></div>
+      <div class="row"><svg width="34" height="20"><polygon points="17,2 33,10 17,18 1,10" class="shape type-derived"/></svg><span>[fx] Derived field</span></div>
+      <div class="row"><svg width="34" height="20"><rect x="2" y="2" width="30" height="16" class="shape type-target"/><rect x="4" y="4" width="26" height="12" fill="none" stroke="#7a2e86"/></svg><span>[T] Target mart column</span></div>
+      <div class="row"><svg width="34" height="20"><polygon points="7,2 33,2 27,18 1,18" class="shape type-parameter"/></svg><span>[P] Runtime parameter</span></div>
+      <strong style="font-size:12px;display:block;margin-top:8px">Evidence grade</strong>
+      <div class="row"><svg width="34" height="20"><rect x="1" y="2" width="32" height="16" class="shape"/></svg><span>[explicit] named by a checked-in artifact</span></div>
+      <div class="row"><svg width="34" height="20"><rect x="1" y="2" width="32" height="16" class="shape" stroke-dasharray="6 3"/></svg><span>[inferred] from wrapper order / sample / naming</span></div>
+      <div class="row"><svg width="34" height="20"><rect x="1" y="2" width="32" height="16" class="shape" stroke-dasharray="2 3"/></svg><span>[external] artifact not in repo (.mp/.pset)</span></div>
+      <p class="muted" style="margin-top:6px">Types and grades differ by <em>shape, stroke and [tag]</em>, not color alone.</p>
+    </div>
+    <div id="walk">
+      <strong style="font-size:12px;">Ordered walkthrough</strong>
+      <button class="btn" id="resetBtn">Reset highlight</button>
+      <ol id="walklist"></ol>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===================== EDIT BELOW FOR YOUR ATTRIBUTE ===================== */
+const TARGET = "ORACLE_STG.STAGING.ORDERS.ORDER_STATUS";
+const COLTITLES = ["Source column","extract_orders (external)","cdc_orders","load_staging_orders · DML bind","load_staging_orders · MERGE","Runtime parameters"];
+
+// layer = column index (0..N, left->right). type ∈ source|intermediate|derived|target|parameter. ev ∈ explicit|inferred|external.
+const NODES = [
+  {id:"src_status", layer:0, type:"source", ev:"inferred", label:"ORDER_SYSTEM.ORDERS", sub:"STATUS", d:{system:"ORDER_SYSTEM (source DB, name from setenv.ksh comments)", graph:"extract_orders", artifact:"scripts/run_daily_orders.ksh", wrapper:"scripts/run_daily_orders.ksh (step 1)", stage_column:"raw_orders.status", role:"raw status value, column 4 of data/sample/orders.dat", missing:["graphs/orders/extract_orders.mp","psets/orders_extract.pset"]}},
+
+  {id:"raw_status", layer:1, type:"intermediate", ev:"inferred", label:"raw_orders", sub:"status", d:{graph:"extract_orders", artifact:"data/sample/orders.dat", stage_column:"raw_orders.status", hop_type:"extract (pipe-delimited landing file)", rule:"col4 of 'order_id|customer_id|order_date|status|total_amount|item_count|region'", missing:["graphs/orders/extract_orders.mp"]}},
+
+  {id:"delta_status", layer:2, type:"intermediate", ev:"inferred", hop:1, label:"orders_delta", sub:"status", d:{graph:"cdc_orders", artifact:"graphs/cdc_processor.py", stage_column:"orders_delta.status", hop_type:"cdc (hash compare, multi-output: inserts/updates/deletes)", key:"order_id (inferred; key_columns is a ctor arg)", inputs:["raw_orders.status"], formula:"CDCProcessor(key_columns=['order_id']).process(source_df, target_df)\n_row_hash = md5(concat(compare_columns)) -> changed rows keep status unchanged", missing:["graphs/orders/cdc_orders.mp","psets/orders_cdc.pset"]}},
+
+  {id:"dml_status", layer:3, type:"intermediate", ev:"explicit", hop:2, label:"order_items (DML)", sub:"order_status", d:{graph:"load_staging_orders", artifact:"psets/pset_templates/orders_staging.pset", dml:"dml/order_items.dml (string(\"\\n\") order_status)", pset:"orders_staging.pset: DML_FILE=/data/projects/enterprise_etl/dml/order_items.dml", stage_column:"order_items.order_status", hop_type:"record-format bind", inputs:["orders_delta.status"], rule:"positional bind: last field of order_items.dml; NOTE order_items.dml (5 fields, vectors) does not match orders.dat (7 flat cols) — reported as finding F-DML-1"}},
+
+  {id:"tgt_status", layer:4, type:"target", ev:"explicit", hop:3, label:"STAGING.ORDERS", sub:"ORDER_STATUS", d:{system:"ORACLE_STG (TARGET_DB=ORACLE_STG in orders_staging.pset)", graph:"load_staging_orders", artifact:"psets/pset_templates/orders_staging.pset", pset:"TARGET_TABLE=STAGING.ORDERS · LOAD_MODE=MERGE · REJECT_PATH=/data/rejects/orders", stage_column:"STAGING.ORDERS.ORDER_STATUS", hop_type:"load (MERGE)", load_mode:"MERGE", key:"order_id (inferred merge key)", inputs:["order_items.order_status"], rule:"MERGE INTO STAGING.ORDERS ... WHEN MATCHED THEN UPDATE SET ORDER_STATUS = src.order_status"}},
+
+  {id:"p_batch_date", layer:5, type:"parameter", ev:"explicit", label:"BATCH_DATE", sub:"run_daily_orders.ksh", d:{graph:"all orders graphs", artifact:"scripts/run_daily_orders.ksh", role:"-BATCH_DATE ${BATCH_DATE} passed to every air sandbox run; selects the day, does not change the value of ORDER_STATUS"}},
+  {id:"p_partitions", layer:5, type:"parameter", ev:"explicit", label:"PARTITION_COUNT=8", sub:"orders_staging.pset", d:{graph:"load_staging_orders", artifact:"psets/pset_templates/orders_staging.pset", role:"parallelism of the load; value-invariant for ORDER_STATUS"}},
+];
+
+const EDGES = [
+  {f:"src_status", t:"raw_status", k:"extract (external graph)", graph:"extract_orders", ev:"inferred"},
+  {f:"raw_status", t:"delta_status", k:"hash-compare CDC, status carried on changed rows", graph:"cdc_orders", ev:"inferred"},
+  {f:"delta_status", t:"dml_status", k:"record-format bind via DML_FILE", graph:"load_staging_orders", ev:"explicit"},
+  {f:"dml_status", t:"tgt_status", k:"MERGE load on order_id", graph:"load_staging_orders", ev:"explicit"},
+  {f:"p_batch_date", t:"tgt_status", k:"runtime parameter (not value lineage)", graph:"load_staging_orders", ev:"explicit"},
+  {f:"p_partitions", t:"tgt_status", k:"runtime parameter (not value lineage)", graph:"load_staging_orders", ev:"explicit"},
+];
+
+// Ordered walkthrough (sources first, then hops in order, then parameters). Each entry: {id, t}.
+const WALK = [
+  {id:"src_status", t:"Source · ORDER_SYSTEM.ORDERS.STATUS"},
+  {id:"raw_status", t:"Extract · raw_orders.status (external graph)"},
+  {id:"delta_status", t:"Hop 1 · cdc_orders -> orders_delta.status"},
+  {id:"dml_status", t:"Hop 2 · DML bind -> order_items.order_status"},
+  {id:"tgt_status", t:"Hop 3 · MERGE -> STAGING.ORDERS.ORDER_STATUS"},
+  {id:"p_batch_date", t:"Parameter · BATCH_DATE"},
+  {id:"p_partitions", t:"Parameter · PARTITION_COUNT"},
+];
+/* ===================== EDIT ABOVE FOR YOUR ATTRIBUTE ===================== */
+
+/* ---- Generic renderer (auto-layout by layer; no per-attribute edits needed) ---- */
+const NW = 210, NH = 46, COLGAP = 290, ROWGAP = 22, MARGIN_X = 16, MARGIN_Y = 36;
+const TAG = {source:"[S]", intermediate:"[I]", derived:"[fx]", target:"[T]", parameter:"[P]"};
+const SVGNS = "http://www.w3.org/2000/svg";
+const byId = Object.fromEntries(NODES.map(n=>[n.id,n]));
+
+const layers = {};
+NODES.forEach(n=>{ (layers[n.layer] ||= []).push(n); });
+Object.keys(layers).forEach(L=>{
+  layers[L].forEach((n,i)=>{ n.x = MARGIN_X + n.layer*COLGAP; n.y = MARGIN_Y + i*(NH+ROWGAP); });
+});
+const maxRows = Math.max(...Object.values(layers).map(a=>a.length));
+const maxLayer = Math.max(...NODES.map(n=>n.layer));
+const W = MARGIN_X + (maxLayer+1)*COLGAP;
+const H = MARGIN_Y + maxRows*(NH+ROWGAP) + 20;
+
+document.getElementById("title").textContent = TARGET.split(".").pop() + " — Column-Level Lineage";
+document.getElementById("subtitle").textContent = "Target: " + TARGET + " · click any node or edge for details";
+
+const svg = document.getElementById("svg");
+svg.setAttribute("width", W); svg.setAttribute("height", H); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+function el(tag, attrs){ const e=document.createElementNS(SVGNS,tag); for(const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+function cy(n){ return n.y + NH/2; }
+function escapeHtml(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+const defs = el("defs",{});
+for (const [id,color] of [["arrow","#94a3b8"],["arrowhl","#e11d48"]]){
+  const m = el("marker",{id, markerWidth:9, markerHeight:9, refX:8, refY:3, orient:"auto", markerUnits:"strokeWidth"});
+  m.appendChild(el("path",{d:"M0,0 L8,3 L0,6 Z", fill:color})); defs.appendChild(m);
+}
+svg.appendChild(defs);
+
+COLTITLES.forEach((t,i)=>{ const e=el("text",{x:MARGIN_X+i*COLGAP+NW/2, y:18, "text-anchor":"middle", class:"collab"}); e.textContent=t; svg.appendChild(e); });
+
+const edgeEls = [];
+for (const e of EDGES){
+  const a=byId[e.f], b=byId[e.t]; if(!a||!b) continue;
+  const x1=a.x+NW, y1=cy(a), x2=b.x, y2=cy(b), mx=(x1+x2)/2;
+  const dpath=`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+  const g=el("g",{});
+  g.appendChild(el("path",{d:dpath, class:"edgehit"}));
+  const vis=el("path",{d:dpath, class:"edge ev-"+(e.ev||"explicit")}); g.appendChild(vis);
+  g.addEventListener("click",(ev)=>{ ev.stopPropagation(); showEdge(e); });
+  svg.appendChild(g); edgeEls.push({e, vis});
+}
+
+const nodeEls = {};
+for (const n of NODES){
+  const g=el("g",{class:"node type-"+n.type+" ev-"+(n.ev||"explicit"), transform:`translate(${n.x},${n.y})`});
+  if (n.type==="source") g.appendChild(el("rect",{x:0,y:0,width:NW,height:NH,rx:2,class:"shape"}));
+  else if (n.type==="intermediate") g.appendChild(el("rect",{x:0,y:0,width:NW,height:NH,rx:NH/2,class:"shape"}));
+  else if (n.type==="derived") g.appendChild(el("polygon",{points:`${NW/2},0 ${NW},${NH/2} ${NW/2},${NH} 0,${NH/2}`,class:"shape"}));
+  else if (n.type==="parameter") g.appendChild(el("polygon",{points:`24,0 ${NW},0 ${NW-24},${NH} 0,${NH}`,class:"shape"}));
+  else { g.appendChild(el("rect",{x:0,y:0,width:NW,height:NH,class:"shape"})); g.appendChild(el("rect",{x:4,y:4,width:NW-8,height:NH-8,fill:"none",stroke:"#7a2e86","stroke-width":1})); }
+  const badge=el("text",{x:6,y:14,class:"badge",fill:"#334155"}); badge.textContent=TAG[n.type]||"[?]"; g.appendChild(badge);
+  const evt=el("text",{x:NW/2,y:14,"text-anchor":"middle",class:"evtag"}); evt.textContent="["+(n.ev||"explicit")+"]"; g.appendChild(evt);
+  if (n.hop){ const ht=el("text",{x:NW-6,y:14,"text-anchor":"end",class:"hoptag"}); ht.textContent="HOP "+n.hop; g.appendChild(ht); }
+  const t1=el("text",{x:NW/2,y:27,"text-anchor":"middle",class:"nlabel"}); t1.textContent=n.label; g.appendChild(t1);
+  const t2=el("text",{x:NW/2,y:40,"text-anchor":"middle",class:"nsub"}); t2.textContent=n.sub; g.appendChild(t2);
+  g.addEventListener("click",(ev)=>{ ev.stopPropagation(); selectNode(n.id); });
+  svg.appendChild(g); nodeEls[n.id]=g;
+}
+svg.addEventListener("click", resetHighlight);
+
+function connectedEdges(id){ return EDGES.filter(e=>e.f===id||e.t===id); }
+function selectNode(id){
+  Object.values(nodeEls).forEach(g=>{ g.classList.add("dimmed"); g.classList.remove("selected"); });
+  edgeEls.forEach(o=>{ o.vis.classList.add("dimmed"); o.vis.classList.remove("hl"); });
+  const keep=new Set([id]); connectedEdges(id).forEach(e=>{ keep.add(e.f); keep.add(e.t); });
+  keep.forEach(k=>nodeEls[k] && nodeEls[k].classList.remove("dimmed"));
+  nodeEls[id].classList.add("selected");
+  edgeEls.forEach(o=>{ if(o.e.f===id||o.e.t===id){ o.vis.classList.remove("dimmed"); o.vis.classList.add("hl"); }});
+  renderNodeDetail(byId[id]);
+}
+function renderNodeDetail(n){
+  const d=n.d||{}, ev=n.ev||"explicit";
+  let h=`<span class="pill">${TAG[n.type]} ${n.type}${n.hop?` · HOP ${n.hop}`:""}</span><span class="pill ${ev}">${ev}</span>`;
+  h+=`<div class="k">column / field</div><div class="v"><b>${escapeHtml(n.label)}.${escapeHtml(n.sub)}</b></div>`;
+  if (d.missing && d.missing.length) h+=`<div class="warn">Not in repo (external): ${d.missing.map(escapeHtml).join(", ")}</div>`;
+  const order=["system","graph","artifact","dml","pset","wrapper","stage_column","hop_type","key","load_mode","role","precision"];
+  const labels={system:"system",graph:"graph (.mp name from wrapper)",artifact:"evidence artifact",dml:"DML record format",pset:"PSET parameters",wrapper:"ksh wrapper",stage_column:"stage column",hop_type:"hop type",key:"key",load_mode:"load mode",role:"role",precision:"precision"};
+  order.forEach(k=>{ if(d[k]!=null) h+=`<div class="k">${labels[k]}</div><div class="v">${escapeHtml(d[k])}</div>`; });
+  if (d.inputs) h+=`<div class="k">inputs</div><div class="v">${d.inputs.map(x=>"· "+escapeHtml(x)).join("<br>")}</div>`;
+  if (d.formula) h+=`<div class="k">formula / transform</div><div class="formula">${escapeHtml(d.formula)}</div>`;
+  else if (d.rule) h+=`<div class="k">rule</div><div class="formula">${escapeHtml(d.rule)}</div>`;
+  document.getElementById("detail").innerHTML=h;
+}
+function showEdge(e){
+  Object.values(nodeEls).forEach(g=>{ g.classList.add("dimmed"); g.classList.remove("selected"); });
+  edgeEls.forEach(o=>{ o.vis.classList.add("dimmed"); o.vis.classList.remove("hl"); });
+  [e.f,e.t].forEach(k=>{ nodeEls[k].classList.remove("dimmed"); nodeEls[k].classList.add("selected"); });
+  edgeEls.forEach(o=>{ if(o.e===e){ o.vis.classList.remove("dimmed"); o.vis.classList.add("hl"); }});
+  const a=byId[e.f], b=byId[e.t], ev=e.ev||"explicit";
+  let h=`<span class="pill">edge</span><span class="pill ${ev}">${ev}</span>`;
+  h+=`<div class="k">from</div><div class="v">${escapeHtml(a.label)}.${escapeHtml(a.sub)}</div>`;
+  h+=`<div class="k">to</div><div class="v">${escapeHtml(b.label)}.${escapeHtml(b.sub)}</div>`;
+  h+=`<div class="k">relationship</div><div class="v">${escapeHtml(e.k||"")}</div>`;
+  if (e.graph) h+=`<div class="k">graph</div><div class="v">${escapeHtml(e.graph)}</div>`;
+  document.getElementById("detail").innerHTML=h;
+}
+function resetHighlight(){
+  Object.values(nodeEls).forEach(g=>{ g.classList.remove("dimmed"); g.classList.remove("selected"); });
+  edgeEls.forEach(o=>{ o.vis.classList.remove("dimmed"); o.vis.classList.remove("hl"); });
+}
+const wl=document.getElementById("walklist");
+WALK.forEach(w=>{ const li=document.createElement("li"); li.textContent=w.t; li.addEventListener("click",()=>selectNode(w.id)); wl.appendChild(li); });
+document.getElementById("resetBtn").addEventListener("click", resetHighlight);
+</script>
+</body>
+</html>
